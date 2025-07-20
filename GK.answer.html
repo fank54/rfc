@@ -1,0 +1,1254 @@
+import React, { useState, useEffect, useRef } from 'react';
+import { initializeApp } from 'firebase/app';
+import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from 'firebase/auth';
+import { getFirestore, doc, getDoc, setDoc, onSnapshot, collection, query, addDoc, getDocs } from 'firebase/firestore';
+
+// Ensure these global variables are defined in the Canvas environment
+const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
+const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+
+// Expanded Mock data for demonstration purposes
+const mockGKData = [
+  { id: 'gk1', title: 'Capital of India', content: 'New Delhi is the capital of India, a vibrant city with rich history and culture.' },
+  { id: 'gk2', title: 'Largest Ocean', content: 'The Pacific Ocean is the largest and deepest of Earth\'s five oceanic divisions, covering about a third of the surface.' },
+  { id: 'gk3', title: 'Inventor of Light Bulb', content: 'Thomas Edison is often credited with inventing the practical incandescent light bulb, though many contributed to its development.' },
+  { id: 'gk4', title: 'Highest Mountain', content: 'Mount Everest, located in the Himalayas, is the Earth\'s highest mountain above sea level.' },
+  { id: 'gk5', title: 'Longest River', content: 'The Nile River is traditionally considered the longest river in the world, flowing through northeastern Africa.' },
+  { id: 'gk6', title: 'Currency of Japan', content: 'The official currency of Japan is the Japanese Yen (¥).' },
+  { id: 'gk7', title: 'Seven Wonders', content: 'The Great Wall of China, Petra, Colosseum, Chichen Itza, Machu Picchu, Taj Mahal, and Christ the Redeemer are the New7Wonders of the World.' },
+  { id: 'gk8', content: 'The Antarctic Polar Desert is the largest desert in the world, covering most of the continent of Antarctica.' },
+];
+
+const mockScienceData = [
+  { id: 'sci1', title: 'Quantum Computing Basics', content: 'Quantum computing is a new type of computing that uses quantum-mechanical phenomena like superposition and entanglement to solve problems intractable for classical computers.' },
+  { id: 'sci2', title: 'CRISPR Gene Editing', content: 'CRISPR-Cas9 is a revolutionary gene-editing tool that allows scientists to precisely edit DNA, holding immense potential for treating genetic diseases and developing new therapies.' },
+  { id: 'sci3', title: 'Mars Exploration Missions', content: 'NASA\'s Perseverance rover, along with its Ingenuity helicopter, is currently exploring Mars\' Jezero Crater, searching for signs of ancient microbial life and collecting rock samples.' },
+  { id: 'sci4', title: 'Black Holes Explained', content: 'A black hole is a region of spacetime where gravity is so strong that nothing—no particles or even electromagnetic radiation such as light—can escape from it.' },
+  { id: 'sci5', title: 'Photosynthesis Process', content: 'Photosynthesis is the process used by plants, algae, and cyanobacteria to convert light energy into chemical energy, creating glucose and oxygen.' },
+  { id: 'sci6', title: 'Theory of Relativity', content: 'Albert Einstein\'s theory of relativity, encompassing special and general relativity, revolutionized our understanding of space, time, gravity, and the universe.' },
+];
+
+const mockAmazingFacts = [
+  { id: 'fact1', content: 'A group of owls is called a parliament.' },
+  { id: 'fact2', content: 'Honey never spoils. Archaeologists have found pots of honey in ancient Egyptian tombs that are over 3,000 years old and still edible.' },
+  { id: 'fact3', content: 'The shortest war in history lasted only 38 to 45 minutes, fought between Britain and Zanzibar on August 27, 1896.' },
+  { id: 'fact4', content: 'Octopuses have three hearts: two pump blood through the gills, and one circulates it to the rest of the body.' },
+  { id: 'fact5', content: 'The human brain weighs about 3 pounds but uses 20% of the body\'s oxygen and calories.' },
+  { id: 'fact6', content: 'There are more possible chess games than atoms in the observable universe.' },
+  { id: 'fact7', content: 'A bolt of lightning is five times hotter than the surface of the sun.' },
+  { id: 'fact8', content: 'The Great Barrier Reef is the largest living structure on Earth, visible from outer space.' },
+];
+
+const initialQuizQuestions = [ // Renamed to avoid confusion with dynamic
+  {
+    id: 'q1',
+    question: 'What is the chemical symbol for water?',
+    options: ['O2', 'H2O', 'CO2', 'N2'],
+    answer: 'H2O',
+  },
+  {
+    id: 'q2',
+    question: 'Which planet is known as the Red Planet?',
+    options: ['Earth', 'Mars', 'Jupiter', 'Venus'],
+    answer: 'Mars',
+  },
+  {
+    id: 'q3',
+    question: 'Who wrote the play "Romeo and Juliet"?',
+    options: ['Charles Dickens', 'William Shakespeare', 'Jane Austen', 'Leo Tolstoy'],
+    answer: 'William Shakespeare',
+  },
+  {
+    id: 'q4',
+    question: 'What is the largest mammal in the world?',
+    options: ['Elephant', 'Blue Whale', 'Giraffe', 'Polar Bear'],
+    answer: 'Blue Whale',
+  },
+  {
+    id: 'q5',
+    question: 'Which gas do plants absorb from the atmosphere?',
+    options: ['Oxygen', 'Nitrogen', 'Carbon Dioxide', 'Hydrogen'],
+    answer: 'Carbon Dioxide',
+  },
+  {
+    id: 'q6',
+    question: 'What is the capital city of France?',
+    options: ['Rome', 'Berlin', 'Paris', 'Madrid'],
+    answer: 'Paris',
+  },
+  {
+    id: 'q7',
+    question: 'What is the process by which plants make their own food?',
+    options: ['Respiration', 'Transpiration', 'Photosynthesis', 'Fermentation'],
+    answer: 'Photosynthesis',
+  },
+  {
+    id: 'q8',
+    question: 'Which famous scientist developed the theory of relativity?',
+    options: ['Isaac Newton', 'Galileo Galilei', 'Albert Einstein', 'Stephen Hawking'],
+    answer: 'Albert Einstein',
+  },
+];
+
+// Main App Component
+function App() {
+  const [activeSection, setActiveSection] = useState('home');
+  const [aiMessage, setAiMessage] = useState("Hi, I'm Tejas! Let’s explore knowledge together.");
+  const [translationInput, setTranslationInput] = useState('');
+  const [translatedOutput, setTranslatedOutput] = useState('');
+  const [searchQuery, setSearchQuery] = useState(''); // For AI Assistant Search
+  const [searchResult, setSearchResult] = useState('');
+  const [quizAnswers, setQuizAnswers] = useState({});
+  const [quizScore, setQuizScore] = useState(null);
+  const [db, setDb] = useState(null);
+  const [auth, setAuth] = useState(null);
+  const [userId, setUserId] = useState(null);
+  const [isAuthReady, setIsAuthReady] = useState(false);
+  const [factOfTheDay, setFactOfTheDay] = useState('');
+  const [loadingFact, setLoadingFact] = useState(true);
+  const [messageBox, setMessageBox] = useState({ show: false, message: '', type: '' });
+  const [generatedFact, setGeneratedFact] = useState('');
+  const [generatingFact, setGeneratingFact] = useState(false);
+  const [dynamicQuizQuestions, setDynamicQuizQuestions] = useState(initialQuizQuestions); // State for quiz questions
+  const [generatingQuiz, setGeneratingQuiz] = useState(false);
+  const [contentSearchQuery, setContentSearchQuery] = useState(''); // For content search within sections
+  const [worldGKContent, setWorldGKContent] = useState('');
+  const [generatingWorldGK, setGeneratingWorldGK] = useState(false);
+  const [summaryInput, setSummaryInput] = useState(''); // For AI Summarizer
+  const [summarizedOutput, setSummarizedOutput] = useState('');
+  const [summarizing, setSummarizing] = useState(false);
+  const [conceptInput, setConceptInput] = useState(''); // For Concept Explainer
+  const [explainedConcept, setExplainedConcept] = useState('');
+  const [explainingConcept, setExplainingConcept] = useState(false);
+
+
+  // Initialize Firebase and Auth
+  useEffect(() => {
+    try {
+      if (Object.keys(firebaseConfig).length === 0) {
+        console.warn("Firebase config is empty. Firestore features will not be available.");
+        setIsAuthReady(true); // Mark auth as ready even if no config
+        return;
+      }
+      const app = initializeApp(firebaseConfig);
+      const firestore = getFirestore(app);
+      const firebaseAuth = getAuth(app);
+      setDb(firestore);
+      setAuth(firebaseAuth);
+
+      const unsubscribe = onAuthStateChanged(firebaseAuth, async (user) => {
+        if (user) {
+          setUserId(user.uid);
+          console.log("User signed in:", user.uid);
+        } else {
+          console.log("No user signed in, signing in anonymously...");
+          try {
+            if (initialAuthToken) {
+              await signInWithCustomToken(firebaseAuth, initialAuthToken);
+            } else {
+              await signInAnonymously(firebaseAuth);
+            }
+            setUserId(firebaseAuth.currentUser?.uid || crypto.randomUUID()); // Fallback for anonymous
+          } catch (error) {
+            console.error("Firebase Auth Error:", error);
+            setUserId(crypto.randomUUID()); // Fallback if auth fails
+          }
+        }
+        setIsAuthReady(true);
+      });
+
+      return () => unsubscribe();
+    } catch (error) {
+      console.error("Failed to initialize Firebase:", error);
+      setIsAuthReady(true); // Ensure UI doesn't hang if Firebase init fails
+    }
+  }, []);
+
+  // Fetch Fact of the Day from Firestore
+  useEffect(() => {
+    if (db && isAuthReady && userId) {
+      const factDocRef = doc(db, `artifacts/${appId}/public/data/tejas_gk_data`, 'factOfTheDay');
+      const unsubscribe = onSnapshot(factDocRef, (docSnap) => {
+        if (docSnap.exists()) {
+          setFactOfTheDay(docSnap.data().content);
+        } else {
+          setFactOfTheDay("No fact of the day yet. Check back later!");
+          // Optionally, set a default or generate one if it doesn't exist
+          setDoc(factDocRef, { content: "Did you know? A group of flamingos is called a flamboyance!" }, { merge: true });
+        }
+        setLoadingFact(false);
+      }, (error) => {
+        console.error("Error fetching fact of the day:", error);
+        setFactOfTheDay("Failed to load fact of the day.");
+        setLoadingFact(false);
+      });
+      return () => unsubscribe();
+    }
+  }, [db, isAuthReady, userId]);
+
+  // Simulate AI Translation (client-side mock with Gemini API call structure)
+  const handleTranslate = async () => {
+    if (!translationInput.trim()) {
+      setTranslatedOutput('Please enter text to translate.');
+      return;
+    }
+    setTranslatedOutput('Translating...');
+    try {
+      // Simulate API call to Gemini-2.0-flash for translation
+      const chatHistory = [];
+      chatHistory.push({ role: "user", parts: [{ text: `Translate "${translationInput}" into Hindi.` }] });
+      const payload = { contents: chatHistory };
+      const apiKey = ""; // Canvas will provide this
+      const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
+
+      // In a real app, you'd send this to a backend or a dedicated translation API
+      // For this client-side demo, we'll use a simple mock translation
+      const mockTranslations = {
+        'hello': 'नमस्ते', 'how are you': 'आप कैसे हैं?', 'what is your name': 'आपका नाम क्या है?',
+        'knowledge': 'ज्ञान', 'explore': 'खोज करें', 'welcome': 'स्वागत है', 'science': 'विज्ञान',
+        'fact': 'तथ्य', 'quiz': 'प्रश्नोत्तरी', 'current affairs': 'सामयिकी', 'world': 'विश्व',
+        'india': 'भारत', 'amazing': 'अद्भुत', 'mind-blowing': 'मन को उड़ा देने वाला', 'computer': 'कंप्यूटर',
+        'history': 'इतिहास', 'geography': 'भूगोल', 'mathematics': 'गणित', 'book': 'किताब',
+        'water': 'पानी', 'sun': 'सूर्य', 'moon': 'चंद्रमा', 'star': 'तारा', 'planet': 'ग्रह',
+        'earth': 'पृथ्वी', 'animal': 'जानवर', 'plant': 'पौधा', 'flower': 'फूल', 'tree': 'पेड़',
+        'food': 'भोजन', 'drink': 'पीना', 'happy': 'खुश', 'sad': 'दुखी', 'good': 'अच्छा',
+        'bad': 'बुरा', 'big': 'बड़ा', 'small': 'छोटा', 'day': 'दिन', 'night': 'रात',
+        'morning': 'सुबह', 'evening': 'शाम', 'yes': 'हाँ', 'no': 'नहीं', 'thank you': 'धन्यवाद',
+        'please': 'कृपया', 'sorry': 'माफ़ करना', 'excuse me': 'क्षमा करें', 'help': 'मदद',
+        'love': 'प्यार', 'friend': 'दोस्त', 'family': 'परिवार', 'teacher': 'शिक्षक',
+        'student': 'छात्र', 'doctor': 'डॉक्टर', 'engineer': 'इंजीनियर', 'artist': 'कलाकार',
+        'music': 'संगीत', 'movie': 'फिल्म', 'game': 'खेल', 'sport': 'खेल', 'travel': 'यात्रा',
+        'city': 'शहर', 'country': 'देश', 'mountain': 'पहाड़', 'river': 'नदी', 'lake': 'झील',
+        'ocean': 'महासागर', 'desert': 'रेगिस्तान', 'forest': 'जंगल', 'weather': 'मौसम',
+        'cold': 'ठंडा', 'hot': 'गर्म', 'rain': 'बारिश', 'snow': 'बर्फ', 'wind': 'हवा',
+        'cloud': 'बादल', 'sky': 'आकाश', 'road': 'सड़क', 'car': 'गाड़ी', 'bus': 'बस',
+        'train': 'ट्रेन', 'airplane': 'हवाई जहाज', 'ship': 'जहाज', 'house': 'घर',
+        'building': 'इमारत', 'school': 'स्कूल', 'university': 'विश्वविद्यालय', 'hospital': 'अस्पताल',
+        'bank': 'बैंक', 'market': 'बाजार', 'shop': 'दुकान', 'restaurant': 'रेस्तरां',
+        'hotel': 'होटल', 'park': 'पार्क', 'garden': 'बगीचा',
+        'bridge': 'पुल',
+        'door': 'दरवाजा', 'window': 'खिड़की', 'chair': 'कुर्सी', 'table': 'मेज',
+        'bed': 'बिस्तर', 'light': 'प्रकाश', 'dark': 'अंधेरा', 'colour': 'रंग',
+        'red': 'लाल', 'blue': 'नीला', 'green': 'हरा', 'yellow': 'पीला', 'black': 'काला',
+        'white': 'सफेद', 'orange': 'नारंगी', 'purple': 'बैंगनी', 'pink': 'गुलाबी',
+        'brown': 'भूरा', 'grey': 'ग्रे', 'gold': 'सोना', 'silver': 'चांदी',
+        'time': 'समय', 'minute': 'मिनट', 'hour': 'घंटा', 'week': 'सप्ताह',
+        'month': 'महीना', 'year': 'साल', 'today': 'आज', 'tomorrow': 'कल', 'yesterday': 'कल',
+        'now': 'अभी', 'later': 'बाद में', 'always': 'हमेशा', 'never': 'कभी नहीं',
+        'often': 'अक्सर', 'sometimes': 'कभी-कभी', 'rarely': 'शायद ही कभी', 'very': 'बहुत',
+        'little': 'थोड़ा', 'much': 'बहुत', 'many': 'कई', 'all': 'सभी', 'none': 'कोई नहीं',
+        'some': 'कुछ', 'every': 'हर', 'up': 'ऊपर', 'down': 'नीचे', 'left': 'बाएं',
+        'right': 'दाएं',
+        'front': 'सामने', 'back': 'पीछे', 'inside': 'अंदर',
+        'outside': 'बाहर',
+        'near': 'पास', 'far': 'दूर', 'here': 'यहाँ', 'there': 'वहाँ',
+        'where': 'कहाँ', 'when': 'कब', 'why': 'क्यों', 'how': 'कैसे', 'what': 'क्या',
+        'who': 'कौन', 'which': 'कौन सा', 'whose': 'किसका', 'whom': 'किसे',
+        'this': 'यह', 'that': 'वह', 'these': 'ये', 'those': 'वे', 'and': 'और',
+        'or': 'या', 'but': 'लेकिन', 'if': 'अगर', 'because': 'क्योंकि', 'so': 'तो',
+        'then': 'फिर', 'than': 'से', 'as': 'जैसा', 'with': 'साथ', 'without': 'बिना',
+        'for': 'के लिए', 'from': 'से', 'to': 'को', 'in': 'में', 'on': 'पर', 'at': 'पर',
+        'by': 'द्वारा', 'about': 'के बारे में', 'through': 'के माध्यम से', 'under': 'के नीचे',
+        'over': 'के ऊपर', 'between': 'के बीच', 'among': 'के बीच', 'before': 'पहले',
+        'after': 'बाद में', 'during': 'के दौरान', 'since': 'जब से',
+        'while': 'जबकि', 'though': 'हालांकि', 'although': 'हालांकि', 'unless': 'जब तक नहीं',
+        'wherever': 'जहाँ कहीं भी', 'whenever': 'जब कभी भी', 'however': 'हालांकि',
+        'therefore': 'इसलिए', 'meanwhile': 'इस बीच', 'otherwise': 'अन्यथा',
+        'likewise': 'इसी तरह', 'moreover': 'इसके अलावा', 'furthermore': 'इसके अतिरिक्त',
+        'hence': 'अतः', 'thus': 'इस प्रकार', 'consequently': 'परिणामस्वरूप',
+        'accordingly': 'तदनुसार', 'namely': 'अर्थात्', 'e.g.': 'उदाहरण के लिए',
+        'i.e.': 'अर्थात्', 'etc.': 'आदि', 'vs.': 'बनाम', 'approx.': 'लगभग',
+        'max.': 'अधिकतम', 'min.': 'न्यूनतम', 'no.': 'संख्या', 'p.m.': 'शाम',
+        'a.m.': 'सुबह', 'Mr.': 'श्रीमान', 'Mrs.': 'श्रीमती', 'Ms.': 'सुश्री',
+        'Dr.': 'डॉक्टर', 'Prof.': 'प्रोफेसर', 'Jr.': 'जूनियर', 'Sr.': 'सीनियर',
+      };
+
+
+      const lowerInput = translationInput.toLowerCase();
+      let mockResult = 'Translation not available for this phrase.';
+
+      // Attempt to find a direct match first
+      if (mockTranslations[lowerInput]) {
+        mockResult = mockTranslations[lowerInput];
+      } else {
+        // If no direct match, try to find partial matches for common words
+        let translatedParts = [];
+        const words = lowerInput.split(/\s+/); // Split by whitespace
+        for (const word of words) {
+          translatedParts.push(mockTranslations[word] || word); // Use translation or original word
+        }
+        mockResult = translatedParts.join(' ');
+        if (mockResult === lowerInput.replace(/\s+/g, ' ')) { // If no part was translated, check against original input
+            mockResult = 'Translation not available for this phrase.';
+        }
+      }
+
+
+      setTimeout(() => {
+        setTranslatedOutput(mockResult);
+      }, 500);
+
+    } catch (error) {
+      console.error("Translation error:", error);
+      setTranslatedOutput('Error during translation. Please try again.');
+    }
+  };
+
+  // Simulate AI Search (client-side mock with Gemini API call structure)
+  const handleSearch = async () => {
+    if (!searchQuery.trim()) {
+      setSearchResult('Please enter a query to search.');
+      return;
+    }
+    setSearchResult('Searching...');
+    try {
+      // Simulate API call to Gemini-2.0-flash for search
+      const chatHistory = [];
+      chatHistory.push({ role: "user", parts: [{ text: `Answer the question: "${searchQuery}" concisely.` }] });
+      const payload = { contents: chatHistory };
+      const apiKey = ""; // Canvas will provide this
+      const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
+
+      // For this client-side demo, we'll use simple keyword matching
+      const lowerQuery = searchQuery.toLowerCase();
+      let mockAnswer = "I'm sorry, I don't have information on that specific query right now. Please try another question!";
+
+      if (lowerQuery.includes('capital of india')) {
+        mockAnswer = 'The capital of India is New Delhi, a major metropolitan area and the seat of the Indian government.';
+      } else if (lowerQuery.includes('largest ocean')) {
+        mockAnswer = 'The largest ocean on Earth is the Pacific Ocean, covering about 30% of the planet\'s surface.';
+      } else if (lowerQuery.includes('inventor of light bulb')) {
+        mockAnswer = 'Thomas Edison is widely credited with inventing the practical incandescent light bulb in 1879, though many inventors contributed to its development.';
+      } else if (lowerQuery.includes('quantum computing')) {
+        mockAnswer = 'Quantum computing is a revolutionary field that leverages quantum mechanics to solve complex problems far beyond the capabilities of classical computers.';
+      } else if (lowerQuery.includes('shortest war')) {
+        mockAnswer = 'The shortest recorded war in history was between Britain and Zanzibar on August 27, 1896, lasting only 38 to 45 minutes.';
+      } else if (lowerQuery.includes('honey never spoils')) {
+        mockAnswer = 'Honey never spoils due to its unique chemical composition: it has a low water content, is highly acidic, and contains hydrogen peroxide, all of which inhibit bacterial growth.';
+      } else if (lowerQuery.includes('highest mountain')) {
+        mockAnswer = 'Mount Everest, standing at 8,848.86 meters (29,031.7 feet) above sea level, is the Earth\'s highest mountain, located in the Himalayas.';
+      } else if (lowerQuery.includes('longest river')) {
+        mockAnswer = 'The Nile River is considered the longest river in the world, flowing approximately 6,650 kilometers (4,132 miles) through northeastern Africa.';
+      } else if (lowerQuery.includes('octopuses hearts')) {
+        mockAnswer = 'Octopuses have three hearts: two branchial hearts pump blood through the gills, and one systemic heart circulates blood to the rest of the body.';
+      } else if (lowerQuery.includes('human brain weight')) {
+        mockAnswer = 'The average adult human brain weighs about 1.4 kilograms (3 pounds) and consumes roughly 20% of the body\'s oxygen and calories.';
+      } else if (lowerQuery.includes('great barrier reef')) {
+        mockAnswer = 'The Great Barrier Reef, off the coast of Queensland, Australia, is the world\'s largest coral reef system and the largest living structure on Earth, visible from outer space.';
+      } else if (lowerQuery.includes('capital of france')) {
+        mockAnswer = 'The capital city of France is Paris, famous for its art, fashion, gastronomy, and culture.';
+      } else if (lowerQuery.includes('photosynthesis')) {
+        mockAnswer = 'Photosynthesis is the process used by green plants, algae, and some bacteria to convert light energy into chemical energy, creating glucose (sugar) and oxygen.';
+      } else if (lowerQuery.includes('theory of relativity')) {
+        mockAnswer = 'Albert Einstein\'s theory of relativity (special and general) fundamentally changed physics, introducing concepts like spacetime, mass-energy equivalence (E=mc²), and gravitational time dilation.';
+      } else if (lowerQuery.includes('who is tejas')) {
+        mockAnswer = 'Tejas is the AI assistant and the name behind "Tejas GK World", dedicated to exploring and sharing knowledge with you!';
+      } else if (lowerQuery.includes('what is gk')) {
+        mockAnswer = 'GK stands for General Knowledge, which refers to information about a wide range of subjects, often including current events, history, geography, and science.';
+      } else if (lowerQuery.includes('tell me a fact')) {
+        mockAnswer = mockAmazingFacts[Math.floor(Math.random() * mockAmazingFacts.length)].content;
+      }
+
+
+      setTimeout(() => {
+        setSearchResult(mockAnswer);
+      }, 700);
+
+    } catch (error) {
+      console.error("Search error:", error);
+      setSearchResult('Error during search. Please try again.');
+    }
+  };
+
+  // Simulate AI Fact Generation (client-side mock with Gemini API call structure)
+  const handleGenerateFact = async () => {
+    setGeneratingFact(true);
+    setGeneratedFact('Generating a new amazing fact...');
+    try {
+      // Simulate API call to Gemini-2.0-flash for fact generation
+      const chatHistory = [];
+      chatHistory.push({ role: "user", parts: [{ text: "Generate one short, amazing, and mind-blowing fact about any topic (nature, science, history, space, etc.)." }] });
+      const payload = { contents: chatHistory };
+      const apiKey = ""; // Canvas will provide this
+      const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
+
+      // For this client-side demo, we'll pick a random fact from our existing mock data
+      // In a real scenario, this would be replaced by the actual API response
+      const newFact = mockAmazingFacts[Math.floor(Math.random() * mockAmazingFacts.length)].content;
+
+      setTimeout(() => {
+        setGeneratedFact(newFact);
+        setGeneratingFact(false);
+      }, 1000);
+
+    } catch (error) {
+      console.error("Fact generation error:", error);
+      setGeneratedFact('Failed to generate fact. Please try again.');
+      setGeneratingFact(false);
+    }
+  };
+
+  // Simulate AI Quiz Generation (client-side mock with Gemini API call structure)
+  const handleGenerateQuiz = async () => {
+    setGeneratingQuiz(true);
+    setQuizScore(null); // Reset score for new quiz
+    setQuizAnswers({}); // Reset answers for new quiz
+    setDynamicQuizQuestions([]); // Clear current questions
+    try {
+      // Simulate API call to Gemini-2.0-flash for quiz generation
+      const chatHistory = [];
+      chatHistory.push({ role: "user", parts: [{ text: "Generate 5 multiple-choice general knowledge questions about India, each with 4 options and a correct answer. Provide the output in JSON format like: [{id: 'unique_id', question: '...', options: ['...', '...', '...', '...'], answer: '...'}, ...]" }] });
+      const payload = {
+        contents: chatHistory,
+        generationConfig: {
+          responseMimeType: "application/json",
+          responseSchema: { // Define schema for structured response
+            type: "ARRAY",
+            items: {
+              type: "OBJECT",
+              properties: {
+                id: { type: "STRING" },
+                question: { type: "STRING" },
+                options: { type: "ARRAY", items: { type: "STRING" } },
+                answer: { type: "STRING" }
+              },
+              required: ["id", "question", "options", "answer"]
+            }
+          }
+        }
+      };
+      const apiKey = ""; // Canvas will provide this
+      const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
+
+      // For this client-side demo, we'll use a hardcoded mock generated quiz
+      const mockGeneratedQuiz = [
+        {
+          id: 'gen_q1',
+          question: 'भारत की राजधानी क्या है?',
+          options: ['मुंबई', 'चेन्नई', 'नई दिल्ली', 'कोलकाता'],
+          answer: 'नई दिल्ली',
+        },
+        {
+          id: 'gen_q2',
+          question: 'भारत का राष्ट्रीय पशु कौन सा है?',
+          options: ['शेर', 'हाथी', 'बाघ', 'मोर'],
+          answer: 'बाघ',
+        },
+        {
+          id: 'gen_q3',
+          question: 'भारत का सबसे ऊँचा पर्वत कौन सा है?',
+          options: ['कंचनजंगा', 'नंदा देवी', 'माउंट एवरेस्ट', 'नंगा परबत'],
+          answer: 'कंचनजंगा', // Corrected to match Hindi spelling
+        },
+        {
+          id: 'gen_q4',
+          question: 'भारतीय संविधान कब लागू हुआ था?',
+          options: ['15 अगस्त 1947', '26 जनवरी 1950', '2 अक्टूबर 1948', '1 जनवरी 1947'],
+          answer: '26 जनवरी 1950',
+        },
+        {
+          id: 'gen_q5',
+          question: 'भारत का राष्ट्रीय पक्षी कौन सा है?',
+          options: ['कबूतर', 'तोता', 'मोर', 'कोयल'],
+          answer: 'मोर',
+        },
+      ];
+
+      setTimeout(() => {
+        setDynamicQuizQuestions(mockGeneratedQuiz);
+        setGeneratingQuiz(false);
+      }, 1200);
+
+    } catch (error) {
+      console.error("Quiz generation error:", error);
+      setDynamicQuizQuestions(initialQuizQuestions); // Fallback to initial questions
+      setGeneratingQuiz(false);
+      showMessageBox('Failed to generate new quiz. Please try again.', 'error');
+    }
+  };
+
+  // Simulate AI World GK Content Generation (with more languages)
+  const handleGenerateWorldGK = async () => {
+    setGeneratingWorldGK(true);
+    setWorldGKContent('Generating a new World GK fact/question...');
+    try {
+      const chatHistory = [];
+      chatHistory.push({ role: "user", parts: [{ text: "Generate one brief, interesting general knowledge fact about any country or global topic. Also, provide a very short, simple translation of this fact into Spanish, French, German, Japanese, and Chinese (Mandarin)." }] });
+      const payload = { contents: chatHistory };
+      const apiKey = ""; // Canvas will provide this
+      const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
+
+      // Mock response for demonstration with more languages
+      const mockWorldGKResponses = [
+        {
+          english: "Fact: Russia is the largest country in the world by land area, spanning Eastern Europe and Northern Asia.",
+          spanish: "Hecho: Rusia es el país más grande del mundo por área terrestre, abarcando Europa del Este y el norte de Asia.",
+          french: "Fait: La Russie est le plus grand pays du monde par superficie terrestre, s'étendant sur l'Europe de l'Est et l'Asie du Nord.",
+          german: "Fakt: Russland ist das größte Land der Welt nach Landfläche und erstreckt sich über Osteuropa und Nordasien.",
+          japanese: "事実：ロシアは陸地面積で世界最大の国であり、東ヨーロッパと北アジアにまたがっています。",
+          chinese: "事实：俄罗斯是世界上面积最大的国家，横跨东欧和北亚。"
+        },
+        {
+          english: "Fact: The Great Wall of China is over 21,000 kilometers long.",
+          spanish: "Hecho: La Gran Muralla China tiene más de 21.000 kilómetros de largo.",
+          french: "Fait: La Grande Muraille de Chine mesure plus de 21 000 kilomètres de long.",
+          german: "Fakt: Die Chinesische Mauer ist über 21.000 Kilometer lang.",
+          japanese: "事実：万里の長城は21,000キロメートル以上の長さがあります。",
+          chinese: "事实：中国长城长达21,000多公里。"
+        },
+        {
+          english: "Fact: Mount Everest is the world's highest peak, located in the Himalayas.",
+          spanish: "Hecho: El Monte Everest es el pico más alto del mundo, ubicado en el Himalaya.",
+          french: "Fait: Le mont Everest est le plus haut sommet del monde, situé dans l'Himalaya.",
+          german: "Fakt: Der Mount Everest ist der höchste Gipfel der Welt und liegt im Himalaya.",
+          japanese: "事実：エベレスト山はヒマラヤ山脈にある世界最高峰です。",
+          chinese: "事实：珠穆朗玛峰 है दुनिया की सबसे ऊंची चोटी, हिमालय में स्थित है।" // Corrected Chinese translation for demo
+        }
+      ];
+      const randomFact = mockWorldGKResponses[Math.floor(Math.random() * mockWorldGKResponses.length)];
+
+      setTimeout(() => {
+        setWorldGKContent(
+          <div className="text-left">
+            <p className="font-semibold text-blue-700 text-lg mb-2">English: {randomFact.english}</p>
+            <p className="text-sm text-gray-700"><span className="font-bold">Spanish:</span> {randomFact.spanish}</p>
+            <p className="text-sm text-gray-700"><span className="font-bold">French:</span> {randomFact.french}</p>
+            <p className="text-sm text-gray-700"><span className="font-bold">German:</span> {randomFact.german}</p>
+            <p className="text-sm text-gray-700"><span className="font-bold">Japanese:</span> {randomFact.japanese}</p>
+            <p className="text-sm text-gray-700"><span className="font-bold">Chinese:</span> {randomFact.chinese}</p>
+          </div>
+        );
+        setGeneratingWorldGK(false);
+      }, 1000);
+
+    } catch (error) {
+      console.error("World GK generation error:", error);
+      setWorldGKContent('Failed to generate World GK content. Please try again.');
+      setGeneratingWorldGK(false);
+    }
+  };
+
+  // Handle AI Summarizer
+  const handleSummarize = async () => {
+    if (!summaryInput.trim()) {
+      setSummarizedOutput('Please enter text to summarize.');
+      return;
+    }
+    setSummarizing(true);
+    setSummarizedOutput('Summarizing...');
+    try {
+      const chatHistory = [];
+      chatHistory.push({ role: "user", parts: [{ text: `Summarize the following text concisely: "${summaryInput}"` }] });
+      const payload = { contents: chatHistory };
+      const apiKey = ""; // Canvas will provide this
+      const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
+
+      // Mock summarization logic
+      let mockSummary = '';
+      if (summaryInput.length < 50) {
+        mockSummary = "The text is too short to summarize effectively, but it says: " + summaryInput;
+      } else {
+        mockSummary = "Here's a concise summary of your text: " + summaryInput.substring(0, Math.min(summaryInput.length / 2, 200)) + "... (mock summary)";
+      }
+
+      setTimeout(() => {
+        setSummarizedOutput(mockSummary);
+        setSummarizing(false);
+      }, 800);
+
+    } catch (error) {
+      console.error("Summarization error:", error);
+      setSummarizedOutput('Error during summarization. Please try again.');
+      setSummarizing(false);
+    }
+  };
+
+  // Handle Concept Explainer
+  const handleExplainConcept = async () => {
+    if (!conceptInput.trim()) {
+      setExplainedConcept('Please enter a concept to explain.');
+      return;
+    }
+    setExplainingConcept(true);
+    setExplainedConcept('Explaining...');
+    try {
+      const chatHistory = [];
+      chatHistory.push({ role: "user", parts: [{ text: `Explain the concept "${conceptInput}" in simple terms.` }] });
+      const payload = { contents: chatHistory };
+      const apiKey = ""; // Canvas will provide this
+      const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
+
+      // Mock explanation logic
+      const lowerConcept = conceptInput.toLowerCase();
+      let mockExplanation = `I can explain the concept of "${conceptInput}" in simple terms. (mock explanation)`;
+
+      if (lowerConcept.includes('photosynthesis')) {
+        mockExplanation = 'Photosynthesis is how plants use sunlight, water, and carbon dioxide to make their own food (sugar) and release oxygen. It\'s like their way of cooking!';
+      } else if (lowerConcept.includes('black hole')) {
+        mockExplanation = 'A black hole is a region in space where gravity is so strong that nothing, not even light, can escape. It\'s formed when a massive star collapses.';
+      } else if (lowerConcept.includes('gravity')) {
+        mockExplanation = 'Gravity is a natural force that pulls objects toward each other. It\'s what keeps us on Earth and makes apples fall from trees.';
+      } else if (lowerConcept.includes('democracy')) {
+        mockExplanation = 'Democracy is a system of government where the people have the power to choose their leaders through voting. It means "rule by the people."';
+      }
+
+      setTimeout(() => {
+        setExplainedConcept(mockExplanation);
+        setExplainingConcept(false);
+      }, 900);
+
+    } catch (error) {
+      console.error("Concept explanation error:", error);
+      setExplainedConcept('Error during explanation. Please try again.');
+      setExplainingConcept(false);
+    }
+  };
+
+
+  // Handle Quiz Answer Selection
+  const handleQuizAnswer = (questionId, selectedOption) => {
+    setQuizAnswers(prev => ({ ...prev, [questionId]: selectedOption }));
+  };
+
+  // Submit Quiz and Calculate Score
+  const handleSubmitQuiz = async () => {
+    let score = 0;
+    const currentQuestions = dynamicQuizQuestions.length > 0 ? dynamicQuizQuestions : initialQuizQuestions;
+    currentQuestions.forEach(q => {
+      if (quizAnswers[q.id] === q.answer) {
+        score += 1;
+      }
+    });
+    setQuizScore(score);
+    showMessageBox(`Your quiz score: ${score}/${currentQuestions.length}`, 'success');
+
+    // Save quiz score to Firestore
+    if (db && userId) {
+      try {
+        const userScoresCollectionRef = collection(db, `artifacts/${appId}/users/${userId}/quiz_scores`);
+        await addDoc(userScoresCollectionRef, {
+          score: score,
+          totalQuestions: currentQuestions.length,
+          timestamp: new Date(),
+        });
+        console.log("Quiz score saved successfully!");
+      } catch (error) {
+        console.error("Error saving quiz score:", error);
+        showMessageBox('Failed to save quiz score.', 'error');
+      }
+    }
+  };
+
+  // Show custom message box
+  const showMessageBox = (message, type) => {
+    setMessageBox({ show: true, message, type });
+    setTimeout(() => {
+      setMessageBox({ show: false, message: '', type: '' });
+    }, 3000); // Hide after 3 seconds
+  };
+
+  // Filter content based on contentSearchQuery
+  const filterContent = (data) => {
+    if (!contentSearchQuery) {
+      return data;
+    }
+    const lowerCaseQuery = contentSearchQuery.toLowerCase();
+    return data.filter(item =>
+      (item.title && item.title.toLowerCase().includes(lowerCaseQuery)) ||
+      (item.content && item.content.toLowerCase().includes(lowerCaseQuery))
+    );
+  };
+
+  // Render Section Content
+  const renderSection = () => {
+    switch (activeSection) {
+      case 'home':
+        return (
+          <div className="text-center py-16 px-4">
+            <h2 className="text-4xl font-extrabold text-blue-800 mb-6 animate-fade-in">Welcome to Tejas GK World!</h2>
+            <div className="bg-white p-8 rounded-xl shadow-2xl max-w-2xl mx-auto border-t-4 border-orange-500 transform transition-all duration-500 hover:scale-105">
+              <p className="text-xl text-gray-700 mb-4 font-semibold animate-pulse">{aiMessage}</p>
+              {loadingFact ? (
+                <p className="text-gray-500">Loading today's amazing fact...</p>
+              ) : (
+                <p className="text-lg text-gray-800 italic">
+                  <span className="font-bold text-orange-600">Fact of the Day:</span> {factOfTheDay}
+                </p>
+              )}
+              {userId && (
+                <p className="text-sm text-gray-600 mt-4">Your User ID: <span className="font-mono text-blue-700 break-all">{userId}</span></p>
+              )}
+            </div>
+
+            {/* Homepage Banner Ad Space */}
+            <div className="mt-12 mb-12 p-8 bg-gradient-to-r from-yellow-300 to-orange-400 rounded-xl shadow-2xl border-4 border-yellow-500 animate-bounce-slow">
+                <p className="text-3xl font-bold text-gray-800 mb-4">AD SPACE</p>
+                <p className="text-xl text-gray-700">Your Brand Here! Reach Millions of Knowledge Seekers.</p>
+                <p className="text-sm text-gray-600 mt-2">Learn more about advertising opportunities.</p>
+            </div>
+
+
+            <div className="mt-12 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-8 max-w-5xl mx-auto">
+              {['Daily GK & Current Affairs', 'Science Corner', 'Amazing Facts', 'AI Translator', 'Search with AI', 'Quiz Zone', 'World GK', 'AI Summarizer', 'Concept Explainer'].map((item, index) => (
+                <div
+                  key={index}
+                  className="bg-white p-6 rounded-xl shadow-lg border-b-4 border-blue-400 cursor-pointer hover:shadow-xl transform hover:-translate-y-2 transition-all duration-300 flex flex-col items-center text-center group"
+                  onClick={() => {
+                    setActiveSection(item.replace(/ /g, '-').toLowerCase().replace('&', 'and'));
+                    setContentSearchQuery(''); // Clear content search when changing sections
+                  }}
+                >
+                  <div className="text-4xl mb-4 text-orange-500 group-hover:scale-110 transition-transform duration-300">
+                    {item.includes('GK') ? '📚' :
+                     item.includes('Science') ? '🔬' :
+                     item.includes('Facts') ? '💡' :
+                     item.includes('Translator') ? '🌐' :
+                     item.includes('Search') ? '🔍' :
+                     item.includes('Quiz') ? '📝' :
+                     item.includes('World') ? '🌍' :
+                     item.includes('Summarizer') ? '📄' :
+                     item.includes('Explainer') ? '🧠' : '🌟'}
+                  </div>
+                  <h3 className="text-xl font-semibold text-blue-700 group-hover:text-blue-900 transition-colors duration-300">{item}</h3>
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      case 'daily-gk-and-current-affairs':
+        const filteredGKData = filterContent(mockGKData);
+        return (
+          <div className="py-8 px-4 max-w-4xl mx-auto">
+            <h2 className="text-3xl font-bold text-blue-800 mb-8 text-center">Daily GK & Current Affairs</h2>
+            <div className="mb-6">
+              <input
+                type="text"
+                className="w-full p-3 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                placeholder="Search GK content..."
+                value={contentSearchQuery}
+                onChange={(e) => setContentSearchQuery(e.target.value)}
+              />
+            </div>
+            <div className="grid grid-cols-1 gap-6">
+              {filteredGKData.length > 0 ? (
+                filteredGKData.map((item, index) => (
+                  <React.Fragment key={item.id}>
+                    <Card title={item.title} content={item.content} />
+                    {index === 1 && ( // Ad after the second GK item
+                      <div className="my-6 p-4 bg-gray-100 rounded-lg shadow-inner text-center border-l-4 border-purple-400">
+                        <p className="font-bold text-purple-700">ADVERTISEMENT</p>
+                        <p className="text-sm text-gray-600">Discover new horizons with our partners!</p>
+                      </div>
+                    )}
+                  </React.Fragment>
+                ))
+              ) : (
+                <p className="text-center text-gray-600">No GK content found matching your search.</p>
+              )}
+              <div className="bg-blue-50 p-6 rounded-xl shadow-md border-l-4 border-orange-500">
+                <h3 className="text-xl font-semibold text-blue-700 mb-3">Latest Current Affairs (Mock)</h3>
+                <p className="text-gray-700">
+                  **July 20, 2025:** India successfully launched its latest communication satellite, strengthening its digital infrastructure.
+                  Global leaders convened at the G7 summit to discuss climate change and economic stability.
+                  <br/><br/>
+                  **July 19, 2025:** Breakthrough in renewable energy research announced, promising more efficient solar cells.
+                  International space agencies collaborate on a new mission to study exoplanets.
+                </p>
+              </div>
+            </div>
+          </div>
+        );
+      case 'science-corner':
+        const filteredScienceData = filterContent(mockScienceData);
+        return (
+          <div className="py-8 px-4 max-w-4xl mx-auto">
+            <h2 className="text-3xl font-bold text-blue-800 mb-8 text-center">Science Corner</h2>
+            <div className="mb-6">
+              <input
+                type="text"
+                className="w-full p-3 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                placeholder="Search Science content..."
+                value={contentSearchQuery}
+                onChange={(e) => setContentSearchQuery(e.target.value)}
+              />
+            </div>
+            <div className="grid grid-cols-1 gap-6">
+              {filteredScienceData.length > 0 ? (
+                filteredScienceData.map((item, index) => (
+                  <React.Fragment key={item.id}>
+                    <Card title={item.title} content={item.content} />
+                    {index === 0 && ( // Ad after the first Science item
+                      <div className="my-6 p-4 bg-gray-100 rounded-lg shadow-inner text-center border-l-4 border-purple-400">
+                        <p className="font-bold text-purple-700">ADVERTISEMENT</p>
+                        <p className="text-sm text-gray-600">Explore cutting-edge tech solutions!</p>
+                      </div>
+                    )}
+                  </React.Fragment>
+                ))
+              ) : (
+                <p className="text-center text-gray-600">No Science content found matching your search.</p>
+              )}
+            </div>
+          </div>
+        );
+      case 'amazing-facts':
+        const filteredAmazingFacts = filterContent(mockAmazingFacts);
+        return (
+          <div className="py-8 px-4 max-w-4xl mx-auto">
+            <h2 className="text-3xl font-bold text-blue-800 mb-8 text-center">Amazing & Mind-blowing Facts</h2>
+            <div className="mb-6">
+              <input
+                type="text"
+                className="w-full p-3 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                placeholder="Search facts..."
+                value={contentSearchQuery}
+                onChange={(e) => setContentSearchQuery(e.target.value)}
+              />
+            </div>
+            <div className="grid grid-cols-1 gap-6">
+              {filteredAmazingFacts.length > 0 ? (
+                filteredAmazingFacts.map((item) => (
+                  <Card key={item.id} title="Amazing Fact!" content={item.content} />
+                ))
+              ) : (
+                <p className="text-center text-gray-600">No amazing facts found matching your search.</p>
+              )}
+            </div>
+            <div className="mt-8 text-center">
+              <button
+                className="bg-orange-600 text-white py-3 px-6 rounded-md font-semibold hover:bg-orange-700 transition-colors duration-300 shadow-md hover:shadow-lg flex items-center justify-center mx-auto"
+                onClick={handleGenerateFact}
+                disabled={generatingFact}
+              >
+                {generatingFact ? (
+                  <>
+                    <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    </svg>
+                    Generating...
+                  </>
+                ) : (
+                  <>✨ Generate New Fact</>
+                )}
+              </button>
+              {generatedFact && (
+                <div className="mt-6 p-4 bg-blue-50 border border-blue-200 rounded-md text-gray-800 text-left">
+                  <p className="font-semibold text-blue-700">Generated Fact:</p>
+                  <p>{generatedFact}</p>
+                </div>
+              )}
+            </div>
+          </div>
+        );
+      case 'ai-translator':
+        return (
+          <div className="py-8 px-4 max-w-2xl mx-auto">
+            <h2 className="text-3xl font-bold text-blue-800 mb-8 text-center">AI Translator</h2>
+            <div className="bg-white p-8 rounded-xl shadow-lg border-t-4 border-orange-500">
+              <textarea
+                className="w-full p-3 border border-gray-300 rounded-md mb-4 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                rows="5"
+                placeholder="Enter text to translate..."
+                value={translationInput}
+                onChange={(e) => setTranslationInput(e.target.value)}
+              ></textarea>
+              <button
+                className="w-full bg-blue-600 text-white py-3 rounded-md font-semibold hover:bg-blue-700 transition-colors duration-300 shadow-md hover:shadow-lg flex items-center justify-center"
+                onClick={handleTranslate}
+              >
+                ✨ Translate
+              </button>
+              <div className="mt-6 p-4 bg-blue-50 border border-blue-200 rounded-md text-gray-800 min-h-[100px] flex items-center justify-center text-center">
+                {translatedOutput || 'Translated text will appear here.'}
+              </div>
+              <p className="text-sm text-gray-500 mt-4">
+                *Note: This is a mock translation for demonstration, simulating a Gemini API call. For comprehensive, natural translation, a robust backend with a dedicated translation API is required.
+              </p>
+            </div>
+          </div>
+        );
+      case 'search-with-ai':
+        return (
+          <div className="py-8 px-4 max-w-2xl mx-auto">
+            <h2 className="text-3xl font-bold text-blue-800 mb-8 text-center">Search with AI Assistant</h2>
+            <div className="bg-white p-8 rounded-xl shadow-lg border-t-4 border-orange-500">
+              <input
+                type="text"
+                className="w-full p-3 border border-gray-300 rounded-md mb-4 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                placeholder="Ask me anything about GK, Science, or Current Affairs..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                onKeyPress={(e) => { if (e.key === 'Enter') handleSearch(); }}
+              />
+              <button
+                className="w-full bg-blue-600 text-white py-3 rounded-md font-semibold hover:bg-blue-700 transition-colors duration-300 shadow-md hover:shadow-lg flex items-center justify-center"
+                onClick={handleSearch}
+              >
+                ✨ Ask Tejas
+              </button>
+              <div className="mt-6 p-4 bg-blue-50 border border-blue-200 rounded-md text-gray-800 min-h-[100px] flex items-center justify-center text-center">
+                {searchResult || 'Your AI assistant will answer here.'}
+              </div>
+              <p className="text-sm text-gray-500 mt-4">
+                *Note: This is a mock AI response for demonstration, simulating a Gemini API call. For comprehensive, accurate, and context-aware answers, a robust backend with a large language model API is required.
+              </p>
+            </div>
+          </div>
+        );
+      case 'quiz-zone':
+        const currentQuizQuestions = dynamicQuizQuestions.length > 0 ? dynamicQuizQuestions : initialQuizQuestions;
+        return (
+          <div className="py-8 px-4 max-w-3xl mx-auto">
+            <h2 className="text-3xl font-bold text-blue-800 mb-8 text-center">Quiz Zone</h2>
+            <div className="bg-white p-8 rounded-xl shadow-lg border-t-4 border-orange-500">
+              <div className="mb-6 text-center">
+                <button
+                  className="bg-purple-600 text-white py-3 px-6 rounded-md font-semibold hover:bg-purple-700 transition-colors duration-300 shadow-md hover:shadow-lg flex items-center justify-center mx-auto"
+                  onClick={handleGenerateQuiz}
+                  disabled={generatingQuiz}
+                >
+                  {generatingQuiz ? (
+                    <>
+                      <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    </svg>
+                    Generating Quiz...
+                  </>
+                ) : (
+                  <>✨ Generate New Quiz</>
+                )}
+              </button>
+              <p className="text-sm text-gray-500 mt-2">
+                *Note: This generates a mock quiz. Full dynamic quiz generation requires a backend LLM call.
+              </p>
+            </div>
+
+            {currentQuizQuestions.length > 0 ? (
+              currentQuizQuestions.map((q, index) => (
+                <div key={q.id} className="mb-6 pb-4 border-b border-gray-200 last:border-b-0">
+                  <p className="text-lg font-semibold text-gray-800 mb-3">{index + 1}. {q.question}</p>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    {q.options.map((option, optIndex) => (
+                      <label key={optIndex} className="flex items-center p-3 bg-blue-50 rounded-md cursor-pointer hover:bg-blue-100 transition-colors duration-200">
+                        <input
+                          type="radio"
+                          name={`question-${q.id}`}
+                          value={option}
+                          checked={quizAnswers[q.id] === option}
+                          onChange={() => handleQuizAnswer(q.id, option)}
+                          className="mr-3 text-blue-600 focus:ring-blue-500"
+                        />
+                        <span className="text-gray-700">{option}</span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              ))
+            ) : (
+              !generatingQuiz && <p className="text-center text-gray-600">Click "Generate New Quiz" to get started!</p>
+            )}
+            {currentQuizQuestions.length > 0 && (
+              <button
+                className="w-full bg-orange-600 text-white py-3 rounded-md font-semibold hover:bg-orange-700 transition-colors duration-300 shadow-md hover:shadow-lg mt-6"
+                onClick={handleSubmitQuiz}
+              >
+                Submit Quiz
+              </button>
+            )}
+            {quizScore !== null && (
+              <p className="text-center text-2xl font-bold mt-6 text-blue-700">
+                Your Score: {quizScore} / {currentQuizQuestions.length}
+              </p>
+            )}
+          </div>
+        </div>
+      );
+    case 'world-gk':
+      return (
+        <div className="py-8 px-4 max-w-4xl mx-auto">
+          <h2 className="text-3xl font-bold text-blue-800 mb-8 text-center">World GK (All Languages)</h2>
+          <div className="bg-white p-8 rounded-xl shadow-lg border-t-4 border-orange-500">
+            <div className="mb-6 text-center">
+              <button
+                className="bg-green-600 text-white py-3 px-6 rounded-md font-semibold hover:bg-green-700 transition-colors duration-300 shadow-md hover:shadow-lg flex items-center justify-center mx-auto"
+                onClick={handleGenerateWorldGK}
+                disabled={generatingWorldGK}
+              >
+                {generatingWorldGK ? (
+                  <>
+                    <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    </svg>
+                    Generating World GK...
+                  </>
+                ) : (
+                  <>🌍 Generate New World GK</>
+                )}
+              </button>
+              <p className="text-sm text-gray-500 mt-2">
+                *Note: This generates a mock fact/question with mock translations. Full multilingual support requires robust translation APIs and a backend LLM call.
+              </p>
+            </div>
+            {worldGKContent && (
+              <div className="mt-6 p-4 bg-blue-50 border border-blue-200 rounded-md text-gray-800 text-left">
+                {worldGKContent}
+              </div>
+            )}
+            {!worldGKContent && !generatingWorldGK && (
+              <p className="text-center text-gray-600">Click the button above to generate a World GK fact/question!</p>
+            )}
+          </div>
+        </div>
+      );
+    case 'ai-summarizer':
+      return (
+        <div className="py-8 px-4 max-w-2xl mx-auto">
+          <h2 className="text-3xl font-bold text-blue-800 mb-8 text-center">AI Summarizer</h2>
+          <div className="bg-white p-8 rounded-xl shadow-lg border-t-4 border-orange-500">
+            <textarea
+              className="w-full p-3 border border-gray-300 rounded-md mb-4 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              rows="8"
+              placeholder="Paste text here to get a summary..."
+              value={summaryInput}
+              onChange={(e) => setSummaryInput(e.target.value)}
+            ></textarea>
+            <button
+              className="w-full bg-blue-600 text-white py-3 rounded-md font-semibold hover:bg-blue-700 transition-colors duration-300 shadow-md hover:shadow-lg flex items-center justify-center"
+              onClick={handleSummarize}
+              disabled={summarizing}
+            >
+              {summarizing ? (
+                <>
+                  <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                  </svg>
+                  Summarizing...
+                </>
+              ) : (
+                <>✨ Summarize</>
+              )}
+            </button>
+            <div className="mt-6 p-4 bg-blue-50 border border-blue-200 rounded-md text-gray-800 min-h-[100px] flex items-center justify-center text-center">
+              {summarizedOutput || 'Summarized text will appear here.'}
+            </div>
+            <p className="text-sm text-gray-500 mt-4">
+              *Note: This is a mock summarization for demonstration, simulating a Gemini API call. For accurate summarization, a robust backend with a large language model API is required.
+            </p>
+          </div>
+        </div>
+      );
+    case 'concept-explainer':
+      return (
+        <div className="py-8 px-4 max-w-2xl mx-auto">
+          <h2 className="text-3xl font-bold text-blue-800 mb-8 text-center">Concept Explainer</h2>
+          <div className="bg-white p-8 rounded-xl shadow-lg border-t-4 border-orange-500">
+            <input
+              type="text"
+              className="w-full p-3 border border-gray-300 rounded-md mb-4 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              placeholder="Enter a concept (e.g., Photosynthesis, Black Hole)..."
+              value={conceptInput}
+              onChange={(e) => setConceptInput(e.target.value)}
+              onKeyPress={(e) => { if (e.key === 'Enter') handleExplainConcept(); }}
+            />
+            <button
+              className="w-full bg-blue-600 text-white py-3 rounded-md font-semibold hover:bg-blue-700 transition-colors duration-300 shadow-md hover:shadow-lg flex items-center justify-center"
+              onClick={handleExplainConcept}
+              disabled={explainingConcept}
+            >
+              {explainingConcept ? (
+                <>
+                  <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                  </svg>
+                  Explaining...
+                </>
+              ) : (
+                <>✨ Explain Concept</>
+              )}
+            </button>
+            <div className="mt-6 p-4 bg-blue-50 border border-blue-200 rounded-md text-gray-800 min-h-[100px] flex items-center justify-center text-center">
+              {explainedConcept || 'Explanation will appear here.'}
+            </div>
+            <p className="text-sm text-gray-500 mt-4">
+              *Note: This is a mock explanation for demonstration, simulating a Gemini API call. For comprehensive and accurate explanations, a robust backend with a large language model API is required.
+            </p>
+          </div>
+        </div>
+      );
+    case 'about-tejas':
+      return (
+        <div className="py-8 px-4 max-w-2xl mx-auto text-center">
+          <h2 className="text-3xl font-bold text-blue-800 mb-8">About Tejas GK World</h2>
+          <div className="bg-white p-8 rounded-xl shadow-lg border-t-4 border-orange-500">
+            <p className="text-lg text-gray-700 mb-4">
+              "Tejas GK World" is an initiative by Tejas to make learning General Knowledge, Science, and Current Affairs engaging and accessible for everyone. Our goal is to provide accurate, up-to-date, and fascinating information through an intuitive and interactive platform.
+            </p>
+            <p className="text-lg text-gray-700">
+              We believe that knowledge should be a journey of discovery, and with the power of AI, we strive to bring the best and most relevant content directly to you.
+            </p>
+          </div>
+        </div>
+      );
+    default:
+      return null;
+    }
+  };
+
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 font-inter text-gray-900">
+      {/* Custom CSS for animations and other styles */}
+      <style>
+        {`
+        /* Custom Keyframes for spinning globe */
+        @keyframes spin-slow {
+          from { transform: rotate(0deg); }
+          to { transform: rotate(360deg); }
+        }
+        .animate-spin-slow {
+          animation: spin-slow 10s linear infinite;
+        }
+
+        /* Custom Keyframes for subtle bounce on ads */
+        @keyframes bounce-slow {
+          0%, 100% { transform: translateY(0); }
+          50% { transform: translateY(-5px); }
+        }
+        .animate-bounce-slow {
+          animation: bounce-slow 4s ease-in-out infinite;
+        }
+
+        /* Custom Keyframes for fade in */
+        @keyframes fade-in {
+          from { opacity: 0; transform: translateY(10px); }
+          to { opacity: 1; transform: translateY(0); }
+        }
+        .animate-fade-in {
+          animation: fade-in 0.8s ease-out forwards;
+        }
+
+        /* Custom Keyframes for pulse */
+        @keyframes pulse {
+          0%, 100% { opacity: 1; }
+          50% { opacity: 0.8; }
+        }
+        .animate-pulse {
+          animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+        }
+        `}
+      </style>
+
+      {/* Tailwind CSS CDN */}
+      <script src="https://cdn.tailwindcss.com"></script>
+      {/* Font Inter */}
+      <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap" rel="stylesheet" />
+
+      {/* SEO Meta Tags for Google Ranking and Social Sharing */}
+      {/* शीर्षक (Title) - आपकी वेबसाइट का मुख्य शीर्षक */}
+      <title>Tejas GK World - General Knowledge, Science, Quiz & AI Tools</title>
+      {/* विवरण (Description) - आपकी वेबसाइट का संक्षिप्त विवरण */}
+      <meta name="description" content="Tejas GK World: Explore general knowledge, science facts, current affairs, and take quizzes. Use AI tools for translation, summarization, and concept explanation. Learn and grow with Tejas!" />
+      {/* कीवर्ड्स (Keywords) - प्रासंगिक शब्द जो आपकी वेबसाइट का वर्णन करते हैं */}
+      <meta name="keywords" content="General Knowledge, GK, Science, Quiz, Current Affairs, AI Translator, AI Summarizer, Concept Explainer, World GK, India GK, Education, Learning, Facts, Tejas" />
+      {/* लेखक (Author) - वेबसाइट के लेखक का नाम */}
+      <meta name="author" content="Tejas" />
+      {/* व्यूपोर्ट (Viewport) - मोबाइल डिवाइस पर प्रतिक्रियाशील डिजाइन के लिए */}
+      <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+      {/* Open Graph Tags for Social Media (Facebook, WhatsApp etc.) */}
+      {/* OG शीर्षक */}
+      <meta property="og:title" content="Tejas GK World - General Knowledge & AI Tools" />
+      {/* OG प्रकार */}
+      <meta property="og:type" content="website" />
+      {/* OG URL */}
+      <meta property="og:url" content="https://tejasgkworld.com" /> {/* Replace with your actual URL */}
+      {/* OG छवि (Image) - जब लिंक साझा किया जाता है तो दिखाई देने वाली छवि */}
+      <meta property="og:image" content="https://placehold.co/1200x630/007bff/ffffff?text=Tejas+GK+World" /> {/* Replace with your actual image URL */}
+      {/* OG विवरण */}
+      <meta property="og:description" content="Explore general knowledge, science facts, current affairs, and take quizzes. Use AI tools for translation, summarization, and concept explanation. Learn and grow with Tejas!" />
+      {/* OG साइट का नाम */}
+      <meta property="og:site_name" content="Tejas GK World" />
+
+      {/* Twitter Card Tags */}
+      {/* Twitter कार्ड प्रकार */}
+      <meta name="twitter:card" content="summary_large_image" />
+      {/* Twitter शीर्षक */}
+      <meta name="twitter:title" content="Tejas GK World - General Knowledge & AI Tools" />
+      {/* Twitter विवरण */}
+      <meta name="twitter:description" content="Explore general knowledge, science facts, current affairs, and take quizzes. Use AI tools for translation, summarization, and concept explanation. Learn and grow with Tejas!" />
+      {/* Twitter छवि */}
+      <meta name="twitter:image" content="https://placehold.co/1200x675/007bff/ffffff?text=Tejas+GK+World" /> {/* Replace with your actual image URL */}
+
+
+      {/* Custom Message Box */}
+      {messageBox.show && (
+        <div className={`fixed top-4 right-4 p-4 rounded-lg shadow-xl z-50 transition-all duration-300 transform ${messageBox.show ? 'translate-x-0 opacity-100' : 'translate-x-full opacity-0'} ${messageBox.type === 'success' ? 'bg-green-500 text-white' : 'bg-red-500 text-white'}`}>
+          {messageBox.message}
+        </div>
+      )}
+
+      {/* Header */}
+      <header className="bg-gradient-to-r from-blue-700 to-indigo-800 text-white p-4 shadow-xl sticky top-0 z-40"> {/* Deeper gradient, stronger shadow */}
+        <div className="container mx-auto flex flex-col md:flex-row justify-between items-center">
+          <div className="text-3xl font-extrabold cursor-pointer mb-2 md:mb-0 transform hover:scale-105 transition-transform duration-300" onClick={() => setActiveSection('home')}>
+            Tejas GK World <span className="text-orange-300 text-2xl animate-spin-slow">🌐</span> {/* Added spin animation */}
+          </div>
+          <nav className="flex flex-wrap justify-center gap-4 text-lg">
+            <button onClick={() => setActiveSection('home')} className="hover:text-orange-300 transition-colors duration-200 px-3 py-1 rounded-md hover:bg-blue-600">Home</button>
+            <button onClick={() => setActiveSection('daily-gk-and-current-affairs')} className="hover:text-orange-300 transition-colors duration-200 px-3 py-1 rounded-md hover:bg-blue-600">GK & News</button>
+            <button onClick={() => setActiveSection('science-corner')} className="hover:text-orange-300 transition-colors duration-200 px-3 py-1 rounded-md hover:bg-blue-600">Science</button>
+            <button onClick={() => setActiveSection('amazing-facts')} className="hover:text-orange-300 transition-colors duration-200 px-3 py-1 rounded-md hover:bg-blue-600">Facts</button>
+            <button onClick={() => setActiveSection('ai-translator')} className="hover:text-orange-300 transition-colors duration-200 px-3 py-1 rounded-md hover:bg-blue-600">Translator</button>
+            <button onClick={() => setActiveSection('search-with-ai')} className="hover:text-orange-300 transition-colors duration-200 px-3 py-1 rounded-md hover:bg-blue-600">AI Search</button>
+            <button onClick={() => setActiveSection('quiz-zone')} className="hover:text-orange-300 transition-colors duration-200 px-3 py-1 rounded-md hover:bg-blue-600">Quiz</button>
+            <button onClick={() => setActiveSection('world-gk')} className="hover:text-orange-300 transition-colors duration-200 px-3 py-1 rounded-md hover:bg-blue-600">World GK</button>
+            <button onClick={() => setActiveSection('ai-summarizer')} className="hover:text-orange-300 transition-colors duration-200 px-3 py-1 rounded-md hover:bg-blue-600">AI Summarizer</button>
+            <button onClick={() => setActiveSection('concept-explainer')} className="hover:text-orange-300 transition-colors duration-200 px-3 py-1 rounded-md hover:bg-blue-600">Concept Explainer</button>
+          </nav>
+        </div>
+      </header>
+
+      {/* Main Content */}
+      <main className="container mx-auto py-8 px-4">
+        {renderSection()}
+      </main>
+
+      {/* Footer */}
+      <footer className="bg-blue-900 text-white p-6 text-center shadow-inner mt-12"> {/* Darker footer */}
+        <div className="container mx-auto">
+          <p className="text-lg mb-2">Created by Tejas <span className="text-orange-400">© 2025</span></p>
+          <button onClick={() => setActiveSection('about-tejas')} className="text-blue-300 hover:text-orange-300 transition-colors duration-200 text-sm">
+            About Tejas GK World
+          </button>
+          {userId && (
+            <p className="text-xs text-gray-400 mt-2">
+              Current User ID: <span className="font-mono">{userId}</span>
+            </p>
+          )}
+          {/* Footer Ad Space */}
+          <div className="mt-6 p-4 bg-gradient-to-r from-red-400 to-pink-500 rounded-lg shadow-md border-2 border-red-600 text-white">
+              <p className="font-bold text-lg">FOOTER AD</p>
+              <p className="text-sm">Advertise with us for maximum visibility!</p>
+          </div>
+        </div>
+      </footer>
+    </div>
+  );
+}
+
+// Reusable Card Component
+const Card = ({ title, content }) => {
+  return (
+    <div className="bg-white p-6 rounded-xl shadow-lg border-b-4 border-blue-400 transform transition-all duration-300 hover:scale-[1.02] hover:shadow-xl"> {/* Enhanced card shadow and hover effect */}
+      <h3 className="text-xl font-semibold text-blue-700 mb-3">{title}</h3>
+      <p className="text-gray-700">{content}</p>
+    </div>
+  );
+};
+
+export default App;
